@@ -1,4 +1,4 @@
-name: Deploy repo to VPS
+name: Deploy file to VPS
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   deploy:
-    name: Clone/Pull repo to VPS
+    name: Copy file to VPS
     runs-on: ubuntu-latest
 
     steps:
@@ -16,94 +16,73 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Verify secrets are set
+      - name: Read file content
+        id: read_file
         run: |
-          echo "🔍 Verifying secrets configuration..."
-          if [ -z "${{ secrets.VPS_HOST }}" ]; then
-            echo "❌ ERROR: VPS_HOST secret is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.VPS_PORT }}" ]; then
-            echo "❌ ERROR: VPS_PORT secret is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.VPS_USERNAME }}" ]; then
-            echo "❌ ERROR: VPS_USERNAME secret is not set"
-            exit 1
-          fi
-          if [ -z "${{ secrets.VPS_PASSWORD }}" ]; then
-            echo "❌ ERROR: VPS_PASSWORD secret is not set"
-            exit 1
-          fi
-          echo "✅ All secrets are configured"
-          echo "📍 Host: ${{ secrets.VPS_HOST }}"
-          echo "🔌 Port: ${{ secrets.VPS_PORT }}"
-          echo "👤 Username: ${{ secrets.VPS_USERNAME }}"
+          echo "📖 Reading example.txt content..."
+          FILE_CONTENT_B64=$(base64 -w 0 example.txt)
+          echo "file_content_b64=$FILE_CONTENT_B64" >> $GITHUB_OUTPUT
+          echo "✅ File content read and encoded"
 
-      - name: Test VPS connectivity
-        run: |
-          echo "🔍 Testing connectivity to VPS..."
-          echo "📍 Attempting to connect to ${{ secrets.VPS_HOST }}:${{ secrets.VPS_PORT }}"
-
-          # Test if host is reachable (with timeout)
-          if timeout 5 bash -c "cat < /dev/null > /dev/tcp/${{ secrets.VPS_HOST }}/${{ secrets.VPS_PORT }}" 2>/dev/null; then
-            echo "✅ Port ${{ secrets.VPS_PORT }} is open on ${{ secrets.VPS_HOST }}"
-          else
-            echo "⚠️  WARNING: Cannot connect to ${{ secrets.VPS_HOST }}:${{ secrets.VPS_PORT }}"
-            echo "💡 Troubleshooting tips:"
-            echo "   1. Check if VPS has public IP or domain"
-            echo "   2. Verify firewall allows SSH port (${{ secrets.VPS_PORT }})"
-            echo "   3. Ensure VPS is running and SSH service is active"
-            echo "   4. Try SSH manually: ssh ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }} -p ${{ secrets.VPS_PORT }}"
-          fi
-
-      - name: Deploy repo to VPS
-        uses: appleboy/ssh-action@v1
+      - name: Connecting to VPS
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.VPS_HOST }}
           port: ${{ secrets.VPS_PORT }}
           username: ${{ secrets.VPS_USERNAME }}
           password: ${{ secrets.VPS_PASSWORD }}
-          timeout: 120s
-          command_timeout: 60s
+          timeout: 60s
+          command_timeout: 30s
           debug: true
-          use_insecure_cipher: false
           script: |
             echo "🔌 Connected to VPS successfully"
-            echo "📍 Current directory: $(pwd)"
-            echo "📍 User: $(whoami)"
 
-            REPO_URL="https://github.com/proxuthanh99yd/github-action.git"
-            TARGET_DIR="/home/github-action"
-
+      - name: Create directory if not exists
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          timeout: 60s
+          command_timeout: 30s
+          debug: true
+          script: |
             echo "📁 Creating /home directory if it doesn't exist..."
             mkdir -p /home
             echo "✅ Directory /home ready"
 
-            echo "🔍 Checking if repository already exists..."
-            if [ -d "$TARGET_DIR/.git" ]; then
-              echo "📂 Repository exists, pulling latest changes..."
-              cd $TARGET_DIR
-              git pull origin main || git pull origin master
-              echo "✅ Repository updated successfully"
-            else
-              echo "📥 Repository not found, cloning..."
-              cd /home
-              git clone $REPO_URL github-action
-              echo "✅ Repository cloned successfully"
-            fi
+      - name: Copying example.txt to VPS
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          timeout: 60s
+          command_timeout: 30s
+          debug: true
+          script: |
+            echo "📄 Copying example.txt to /home/example.txt..."
+            echo "${{ steps.read_file.outputs.file_content_b64 }}" | base64 -d > /home/example.txt
+            echo "✅ File copied successfully"
 
-            echo "🔍 Verifying repository..."
-            if [ -d "$TARGET_DIR/.git" ]; then
-              cd $TARGET_DIR
-              COMMIT_HASH=$(git rev-parse --short HEAD)
-              BRANCH=$(git branch --show-current)
-              echo "✅ SUCCESS: Repository $TARGET_DIR exists on VPS"
-              echo "📊 Current branch: $BRANCH"
-              echo "📊 Latest commit: $COMMIT_HASH"
-              echo "📋 Repository contents:"
-              ls -la $TARGET_DIR | head -20
+      - name: Verify file copied
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USERNAME }}
+          password: ${{ secrets.VPS_PASSWORD }}
+          timeout: 60s
+          command_timeout: 30s
+          debug: true
+          script: |
+            echo "🔍 Verifying file exists..."
+            if [ -f /home/example.txt ]; then
+              echo "✅ SUCCESS: File /home/example.txt exists on VPS"
+              echo "📊 File size: $(stat -f%z /home/example.txt 2>/dev/null || stat -c%s /home/example.txt 2>/dev/null || echo 'unknown') bytes"
             else
-              echo "❌ ERROR: Repository not found after clone!"
+              echo "❌ ERROR: File not found!"
               exit 1
             fi
